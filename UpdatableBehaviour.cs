@@ -70,11 +70,6 @@ namespace Sisus
 			Array.Copy(instances, instanceIndex + 1, instances, instanceIndex, instanceCount - instanceIndex);
 			currentInstanceIndex--;
 		}
-		
-		void OnDisableOld()
-		{
-			
-		}
 
 		[Preserve, UsedImplicitly]
 		internal static PlayerLoopSystem.UpdateFunction GetUpdateAllInstancesDelegate() => UpdateAllInstances;
@@ -123,29 +118,65 @@ namespace Sisus
 				var updatableBehaviourTypes =
 					#if UNITY_EDITOR
 					UnityEditor.TypeCache.GetTypesDerivedFrom<UpdatableBehaviour>()
-						.Where(type => type.BaseType is { IsGenericType: true } baseType && baseType.GetGenericTypeDefinition() == typeof(UpdatableBehaviour<>))
+						.Where(type =>
+						{
+							if(type.ContainsGenericParameters)
+							{
+								return false;
+							}
+
+							for(var baseType = type.BaseType; baseType != null; baseType = baseType.BaseType)
+							{
+								if(baseType.IsGenericType && baseType.GetGenericTypeDefinition() == typeof(UpdatableBehaviour<>))
+								{
+									return true;
+								}
+							}
+
+							return false;
+						})
+						.Distinct()
 						.ToArray();
 					#else
 					AppDomain.CurrentDomain.GetAssemblies()
 						.Where(assembly => !assembly.IsDynamic)
 						.SelectMany(assembly => assembly.GetTypes())
-						.Where(type => type.IsSubclassOf(typeof(UpdatableBehaviour)) && type.BaseType is { IsGenericType: true } baseType && baseType.GetGenericTypeDefinition() == typeof(UpdatableBehaviour<>))
+						.Where(type =>
+						{
+							if(!typeof(UpdatableBehaviour).IsAssignableFrom(type) || type.ContainsGenericParameters)
+							{
+								return false;
+							}
+
+							for(var baseType = type.BaseType; baseType != null; baseType = baseType.BaseType)
+							{
+								if(baseType.IsGenericType && baseType.GetGenericTypeDefinition() == typeof(UpdatableBehaviour<>))
+								{
+									return true;
+								}
+							}
+
+							return false;
+						})
+						.Distinct()
 						.ToArray();
 					#endif
+				
+				Debug.Log($"updatableBehaviourTypes ({updatableBehaviourTypes.Length}): {string.Join(", ", updatableBehaviourTypes.Select(t => t.FullName))}");
 
-				var delegatesToAdd = updatableBehaviourTypes.Length;
+				var addCount = updatableBehaviourTypes.Length;
 				var oldLength = oldUpdateSystems.Length;
-				var newLength = oldLength + delegatesToAdd;
+				var newLength = oldLength + addCount;
 				var newUpdateSystems = new PlayerLoopSystem[newLength];
 				Array.Copy(oldUpdateSystems, newUpdateSystems, oldLength);
 
-				for(var typeIndex = 0; typeIndex < delegatesToAdd; typeIndex++)
+				for(var typeIndex = 0; typeIndex < addCount; typeIndex++)
 				{
 					var updatableBehaviourType = updatableBehaviourTypes[typeIndex];
 					newUpdateSystems[oldLength + typeIndex] = new()
 					{
 						type = updatableBehaviourType,
-						updateDelegate = (PlayerLoopSystem.UpdateFunction)updatableBehaviourType.BaseType.GetMethod("GetUpdateAllInstancesDelegate", BindingFlags.NonPublic | BindingFlags.Static).Invoke(null, null)
+						updateDelegate = GetUpdateAllInstancesDelegate(updatableBehaviourType)
 					};
 				}
 
@@ -154,6 +185,20 @@ namespace Sisus
 				playerLoop.subSystemList = rootSystems;
 				PlayerLoop.SetPlayerLoop(playerLoop);
 				return;
+			}
+
+			static PlayerLoopSystem.UpdateFunction GetUpdateAllInstancesDelegate(Type updatableBehaviourType)
+			{
+				for(var baseType = updatableBehaviourType.BaseType; baseType != null; baseType = baseType.BaseType)
+				{
+					if(baseType.IsGenericType && baseType.GetGenericTypeDefinition() == typeof(UpdatableBehaviour<>))
+					{
+						var getUpdateAllInstancesDelegateMethod = baseType.GetMethod("GetUpdateAllInstancesDelegate", BindingFlags.NonPublic | BindingFlags.Static)!;
+						return (PlayerLoopSystem.UpdateFunction)getUpdateAllInstancesDelegateMethod.Invoke(null, null);
+					}
+				}
+
+				throw new InvalidOperationException($"Type {updatableBehaviourType.FullName} does not derive from UpdatableBehaviour<>");
 			}
 		}
 	}
