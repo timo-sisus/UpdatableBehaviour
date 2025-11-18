@@ -68,6 +68,9 @@ namespace Sisus
 			// The number of elements to move is the total count minus the index of the item after the removed one.
 			// Example: count is now 4, we removed index 1. We need to move elements from index 2 up to index 3.
 			Array.Copy(instances, instanceIndex + 1, instances, instanceIndex, instanceCount - instanceIndex);
+			instances[instanceIndex] = null;
+
+			// Adjust UpdateAllInstances current instance index to avoid skipping past one instance.
 			currentInstanceIndex--;
 		}
 
